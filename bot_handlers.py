@@ -106,12 +106,15 @@ async def ask_pages_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"How would you like to record your progress?\n"
         f"How many pages you read or on what page are you on right now?\n"
-        f"type 1 for recording pages\n"
-        f"type 2 for recording page number"
+        f'type "1" for recording pages\n'
+        f'type "2" for recording page number'
     )
     return RECORD_METHOD
 async def get_record_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     record_method = update.message.text
+    if record_method not in ["1", "2"]:
+        await update.message.reply_text("Please enter a valid number.")
+        return RECORD_METHOD
     user_info = {
         "user_id": context.user_data["user_id"],
         "username": context.user_data["username"],
