@@ -4,7 +4,8 @@ import asyncio
 import dataset
 import random
 import string
-from telegram import Update
+from zoneinfo import ZoneInfo
+from telegram import Update, Bot
 from datetime import datetime, time
 from telegram.ext import (
     ApplicationBuilder, 
@@ -15,6 +16,7 @@ from telegram.ext import (
     filters
 )
 # import files
+from main import BOT_TOKEN
 from database_functions import save_inviter, save_function, save_invitee, retrieve_value, update_function
 # general functions
 async def validate_number(input_text: str, update: Update, prompt: str):
@@ -22,7 +24,9 @@ async def validate_number(input_text: str, update: Update, prompt: str):
         await update.message.reply_text(f"That doesn't look like a number. {prompt}")
         return False
     return True
-
+async def send_message_to_user(chat_id: int, text: str):
+    bot = Bot(token=BOT_TOKEN)  # Replace with environment variable if needed
+    await bot.send_message(chat_id=chat_id, text=text)
 # ref link funtion
 async def gen_referal_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inviter_id = update.message.from_user.id
@@ -42,11 +46,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ref_code = args[0] if args else None
     username = update.message.from_user.username or "UnknownUser"
     user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+    context.user_data["chat_id"] = chat_id
     context.user_data["user_id"] = user_id
     context.user_data["username"] = username
     user_info = {
         "user_id": user_id,
-        "username": username
+        "username": username,
+        "chat_id": chat_id
     }
     await asyncio.to_thread(save_function, user_info, "users", "user_id")
     if ref_code:
@@ -112,6 +119,8 @@ async def ask_pages_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return RECORD_METHOD
 async def get_record_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     record_method = update.message.text
+    args = context.args  # Get the arguments passed to /start
+    ref_code = args[0] if args else None
     if record_method not in ["1", "2"]:
         await update.message.reply_text("Please enter a valid number.")
         return RECORD_METHOD
@@ -126,6 +135,12 @@ async def get_record_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await asyncio.to_thread(save_function, user_info, "book_info", "user_id")
     await update.message.reply_text(f"Great, you are set")
+    if ref_code:
+        inviter_username = retrieve_value(ref_code, "bet_pairs", "inviter_username")
+        # add function to notify the user inviting #wip
+        target_chat_id = retrieve_value("user_id", "123456789", "users", "chat_id")  # Replace with real user_id
+        if target_chat_id:
+            await send_message_to_user(target_chat_id, f"The bet has been accepted by {context.user_data['username']}")
     return ConversationHandler.END
 # daily logs
 NOTE, RECORD_NOTE = range(2)

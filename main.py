@@ -3,7 +3,7 @@ import asyncio
 import dataset
 import random
 import string
-from telegram import Update
+from telegram import Update, Bot
 from datetime import datetime, time as datetime_time
 from telegram.ext import (
     ApplicationBuilder, 
