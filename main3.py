@@ -36,7 +36,7 @@ bets_table = db['bets']
 # Conversation states
 (SETUP_PAGES, SETUP_NOTIF_TIME) = range(2)
 (DL_PAGES, DL_NOTE) = range(10, 12)
-(SET_PAYMENT) = range(20)
+(SET_PAYMENT, REF_LINK) = range(20, 22)
 
 # Helper function to parse time (assumed in HH:MM 24-hour format, UTC)
 def parse_time(time_str: str) -> datetime.time:
@@ -241,9 +241,10 @@ async def start_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await update.message.reply_text('Please enter your bet payment amount in USD like: "15"')
     return SET_PAYMENT
 
-async def set_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def set_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     payment_amount = int(update.message.text)
+
     # Find the bet where the user is either user1 or user2
     bet = bets_table.find_one(user1=user_id) or bets_table.find_one(user2=user_id)
     if bet:
@@ -252,8 +253,15 @@ async def set_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             'id': bet_id,
             'payment_amount(USD)': payment_amount
         }, ['id'])
+
+    # Inform the user that their payment has been set
     await update.message.reply_text(f'Your bet payment amount has been set to {payment_amount} USD.')
+
+    # Call the referral link function as the last step
+    await ref_link_handler(update, context)
+
     return ConversationHandler.END
+
 
 # ---------------------------
 # Bet Status Handler
@@ -361,12 +369,12 @@ def main():
         entry_points=[CommandHandler('set_payment', start_payment)],
         states={
             SET_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_payment)],
+            REF_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, ref_link_handler)],
         },
         fallbacks=[CommandHandler('cancel', lambda update, context: update.message.reply_text("Operation cancelled."))],
     )
     application.add_handler(daily_log_conv_handler)
     application.add_handler(payment_conv_handler)
-    application.add_handler(CommandHandler('ref_link', ref_link_handler))
     application.add_handler(CommandHandler('commands', show_commands))
     application.add_handler(CommandHandler('stop_bet', stop_bet))
 
