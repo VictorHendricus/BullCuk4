@@ -3,7 +3,7 @@ import uuid
 import dataset
 import logging
 import json
-
+from bot_token import bot_token
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     ApplicationBuilder,
@@ -316,7 +316,7 @@ async def show_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # Main function
 def main():
-    application = ApplicationBuilder().token("7824308233:AAFKBgHaIJH0OQ6kY7WAALm--G2lWvp65vQ").build()
+    application = ApplicationBuilder().token(bot_token).build()
 
     # Daily log conversation handler
     daily_log_conv_handler = ConversationHandler(
