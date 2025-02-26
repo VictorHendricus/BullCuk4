@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup Your Reading Goal</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+        form { display: inline-block; text-align: left; }
+        label { display: block; margin: 10px 0 5px; }
+        input { width: 100%; padding: 5px; }
+        button { margin-top: 15px; padding: 10px 20px; background-color: #0088cc; color: white; border: none; cursor: pointer; }
+        button:hover { background-color: #007bb5; }
+    </style>
+</head>
+<body>
+    <h1>Setup Your Reading Goal</h1>
+    <form id="setupForm">
+        <label for="pages">Daily Pages Goal:</label>
+        <input type="number" id="pages" name="pages" min="1" required>
+        <label for="time">Notification Time (HH:MM, 24-hour, UTC):</label>
+        <input type="time" id="time" name="time" required>
+        <button type="submit">Submit</button>
+    </form>
+    <script>
+        const form = document.getElementById('setupForm');
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const pages = document.getElementById('pages').value;
+            const time = document.getElementById('time').value;
+            const user_id = Telegram.WebApp.initDataUnsafe.user.id;
+            const data = { pages, time, user_id };
+            Telegram.WebApp.sendData(JSON.stringify(data));
+            Telegram.WebApp.close();
+        });
+    </script>
+</body>
+</html>
