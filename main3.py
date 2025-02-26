@@ -38,6 +38,18 @@ SET_PAYMENT = 20
 def parse_time(time_str: str) -> datetime.time:
     return datetime.datetime.strptime(time_str, "%H:%M").time()
 
+# Helper function to convert local time to UTC based on timezone offset
+def convert_to_utc(time_obj: datetime.time, timezone_offset: int) -> datetime.time:
+    # Create a datetime object for today with the given time
+    now = datetime.datetime.now()
+    dt = datetime.datetime.combine(now.date(), time_obj)
+    
+    # Apply timezone offset (convert to UTC)
+    dt = dt - datetime.timedelta(hours=int(timezone_offset))
+    
+    # Return just the time component
+    return dt.time()
+
 # Schedule a daily reminder
 async def schedule_daily_reminder(chat_id: int, notif_time: datetime.time, application):
     for job in application.job_queue.get_jobs_by_name(str(chat_id)):
@@ -93,7 +105,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data['ref_code'] = ref_code
 
     # Prompt user to open web app for setup
-    keyboard = [[InlineKeyboardButton("Open Setup", web_app=WebAppInfo(url="https://my-web-app.example.com"))]]
+    keyboard = [[InlineKeyboardButton("Open Setup", web_app=WebAppInfo(url="https://victorhendricus.github.io/BullCuk4/"))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Please complete your setup by clicking the button below.", reply_markup=reply_markup)
 
@@ -101,60 +113,89 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     try:
-        data = json.loads(update.message.web_app_data.data)
+        # Log the raw data for debugging
+        raw_data = update.message.web_app_data.data
+        logger.info(f"Received web app data: {raw_data}")
+        
+        data = json.loads(raw_data)
+        book_title = data['book_title']
+        if not book_title or book_title.strip() == "":
+            raise ValueError("Book title cannot be empty")
+        
         pages = int(data['pages'])
         if pages <= 0:
             raise ValueError("Pages must be positive")
+        
         time_str = data['time']
-        notif_time = parse_time(time_str)
-        user_id = data['user_id']
+        timezone_offset = int(data['timezone'])
+        
+        # Parse local time
+        local_time = parse_time(time_str)
+        
+        # Convert to UTC for storage and scheduling
+        utc_time = convert_to_utc(local_time, timezone_offset)
+        
+        user_id = int(data['user_id'])
         if user_id != update.effective_user.id:
             raise ValueError("User ID mismatch")
-    except (ValueError, KeyError) as e:
+            
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        logger.error(f"Error processing web app data: {e}")
         await update.message.reply_text(f"Invalid data: {e}. Please try again.")
         return
 
-    # Store setup data
-    users_table.upsert({
-        'chat_id': chat_id,
-        'daily_pages': pages,
-        'notif_time': notif_time.strftime("%H:%M"),
-    }, ['chat_id'])
+    try:
+        # Store setup data
+        users_table.upsert({
+            'chat_id': chat_id,
+            'daily_pages': pages,
+            'notif_time': utc_time.strftime("%H:%M"),
+            'book_title': book_title,
+            'timezone': timezone_offset
+        }, ['chat_id'])
+        
+        logger.info(f"Saved user setup: chat_id={chat_id}, book={book_title}, pages={pages}, time={utc_time.strftime('%H:%M')}, timezone={timezone_offset}")
 
-    # Handle referral
-    ref_code = context.user_data.get('ref_code')
-    if ref_code:
-        ref_entry = referrals_table.find_one(ref_code=ref_code)
-        if ref_entry:
-            referrer_chat_id = ref_entry['chat_id']
-            users_table.update({
-                'chat_id': chat_id,
-                'referrer': referrer_chat_id
-            }, ['chat_id'])
-            existing_bet = bets_table.find_one(user1=referrer_chat_id, user2=chat_id) or \
-                          bets_table.find_one(user1=chat_id, user2=referrer_chat_id)
-            if not existing_bet:
-                bets_table.insert({
-                    'user1': referrer_chat_id,
-                    'user2': chat_id,
-                    'start_date': datetime.datetime.utcnow().isoformat(),
-                    'status': "started"
-                })
-                logger.info("Bet started between %s and %s", referrer_chat_id, chat_id)
+        # Handle referral
+        ref_code = context.user_data.get('ref_code')
+        if ref_code:
+            ref_entry = referrals_table.find_one(ref_code=ref_code)
+            if ref_entry:
+                referrer_chat_id = ref_entry['chat_id']
+                users_table.update({
+                    'chat_id': chat_id,
+                    'referrer': referrer_chat_id
+                }, ['chat_id'])
+                existing_bet = bets_table.find_one(user1=referrer_chat_id, user2=chat_id) or \
+                            bets_table.find_one(user1=chat_id, user2=referrer_chat_id)
+                if not existing_bet:
+                    bets_table.insert({
+                        'user1': referrer_chat_id,
+                        'user2': chat_id,
+                        'start_date': datetime.datetime.utcnow().isoformat(),
+                        'status': "started"
+                    })
+                    logger.info("Bet started between %s and %s", referrer_chat_id, chat_id)
 
-    # Schedule reminder
-    await schedule_daily_reminder(chat_id, notif_time, context.application)
+        # Schedule reminder
+        await schedule_daily_reminder(chat_id, utc_time, context.application)
 
-    # Confirm and show menu
-    await update.message.reply_text("Setup complete! You'll receive daily reminders at your chosen time.")
-    await show_main_menu(update, context)
+        # Confirm and show menu
+        tz_display = f"UTC{'+' if timezone_offset >= 0 else ''}{timezone_offset}"
+        await update.message.reply_text(f"Setup complete for '{book_title}'! You'll receive daily reminders at {time_str} {tz_display}.")
+        await show_main_menu(update, context)
+        
+    except Exception as e:
+        logger.exception(f"Error saving setup data: {e}")
+        await update.message.reply_text("An error occurred while saving your setup. Please try again.")
 
 # Show main menu
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
         [InlineKeyboardButton("Generate Referral Link", callback_data="ref_link")],
         [InlineKeyboardButton("View Bet Status", callback_data="bet_status")],
-        [InlineKeyboardButton("Log Daily Reading", callback_data="daily_log")]
+        [InlineKeyboardButton("Log Daily Reading", callback_data="daily_log")],
+        [InlineKeyboardButton("View/Change Book", callback_data="view_book")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Main Menu:", reply_markup=reply_markup)
@@ -166,7 +207,9 @@ async def daily_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not user or not user.get('daily_pages') or not user.get('notif_time'):
         await update.message.reply_text("Please complete your setup first by using /start.")
         return ConversationHandler.END
-    await update.message.reply_text("How many pages did you read today?")
+    
+    book_title = user.get('book_title', 'Unknown Book')
+    await update.message.reply_text(f"How many pages did you read today for '{book_title}'?")
     return DL_PAGES
 
 async def dl_pages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -191,6 +234,7 @@ async def dl_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             await update.message.reply_text("Error: User not found. Please use /start.")
             return ConversationHandler.END
         daily_goal = user.get('daily_pages', 0)
+        book_title = user.get('book_title', 'Unknown Book')
         pages_read = context.user_data.get('pages_read', 0)
         goal_completed = 'yes' if pages_read >= daily_goal else 'no'
         daily_logs_table.upsert({
@@ -198,9 +242,10 @@ async def dl_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             'log_date': log_date,
             'pages_read': pages_read,
             'note': note,
-            'goal_completed': goal_completed
+            'goal_completed': goal_completed,
+            'book_title': book_title
         }, ['chat_id', 'log_date'])
-        await update.message.reply_text("Daily log recorded.")
+        await update.message.reply_text(f"Daily log recorded for '{book_title}'.")
     except Exception as e:
         logger.exception("Error recording daily log for chat_id %s: %s", chat_id, e)
         await update.message.reply_text("Error recording log. Please ensure setup is complete with /start.")
@@ -302,6 +347,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data == "daily_log":
         await query.answer()
         await query.edit_message_text("Use /daily_log to log your reading.")
+    elif query.data == "view_book":
+        await query.answer()
+        await view_book_setup(update, context)
+    elif query.data == "test_notif":
+        await query.answer()
+        await test_notification(update, context)
     else:
         await query.answer("Unknown action.")
 
@@ -309,10 +360,90 @@ async def show_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = [
         [InlineKeyboardButton("Generate Referral Link", callback_data="ref_link")],
         [InlineKeyboardButton("View Bet Status", callback_data="bet_status")],
-        [InlineKeyboardButton("Log Daily Reading", callback_data="daily_log")]
+        [InlineKeyboardButton("Log Daily Reading", callback_data="daily_log")],
+        [InlineKeyboardButton("View/Change Book", callback_data="view_book")],
+        [InlineKeyboardButton("Test Notification", callback_data="test_notif")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Main Menu:", reply_markup=reply_markup)
+
+# View current book setup
+async def view_book_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user = users_table.find_one(chat_id=chat_id)
+    if not user or not user.get('book_title'):
+        await update.message.reply_text("You haven't set up a book yet. Use /start to set up.")
+        return
+    
+    book_title = user.get('book_title', 'Unknown Book')
+    daily_pages = user.get('daily_pages', 0)
+    notif_time = user.get('notif_time', 'Not set')
+    timezone = user.get('timezone', 0)
+    
+    tz_display = f"UTC{'+' if int(timezone) >= 0 else ''}{timezone}"
+    
+    message = f"Current Book Setup:\n\nTitle: {book_title}\nDaily Goal: {daily_pages} pages\nReminder Time: {notif_time} {tz_display}"
+    
+    keyboard = [[InlineKeyboardButton("Change Book", web_app=WebAppInfo(url="https://victorhendricus.github.io/BullCuk4/"))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(message, reply_markup=reply_markup)
+
+# Debug command to check database state
+async def debug_db(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    
+    # Only allow for specific users or in development
+    if chat_id != 123456789:  # Replace with your chat_id for testing
+        await update.message.reply_text("Debug command not available.")
+        return
+    
+    try:
+        user = users_table.find_one(chat_id=chat_id)
+        if user:
+            user_info = f"User info:\n"
+            for key, value in user.items():
+                user_info += f"{key}: {value}\n"
+            
+            await update.message.reply_text(user_info)
+        else:
+            await update.message.reply_text("No user record found.")
+            
+        # Check recent logs
+        logs = list(daily_logs_table.find(chat_id=chat_id, order_by='-log_date', _limit=5))
+        if logs:
+            logs_info = f"\nRecent logs:\n"
+            for log in logs:
+                logs_info += f"{log['log_date']}: {log['pages_read']} pages, book: {log.get('book_title', 'Unknown')}\n"
+            await update.message.reply_text(logs_info)
+        else:
+            await update.message.reply_text("No logs found.")
+            
+    except Exception as e:
+        logger.exception(f"Error in debug command: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+# Test notification
+async def test_notification(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user = users_table.find_one(chat_id=chat_id)
+    
+    if not user or not user.get('notif_time'):
+        await update.message.reply_text("You haven't set up notifications yet. Use /start to set up.")
+        return
+    
+    book_title = user.get('book_title', 'your book')
+    notif_time = user.get('notif_time')
+    timezone = user.get('timezone', 0)
+    
+    tz_display = f"UTC{'+' if int(timezone) >= 0 else ''}{timezone}"
+    
+    # Send a test notification
+    await update.message.reply_text(
+        f"This is a test notification for '{book_title}'.\n\n"
+        f"Your daily reminders are scheduled for {notif_time} {tz_display}.\n\n"
+        f"Don't forget to log your reading progress using /daily_log."
+    )
 
 # Main function
 def main():
@@ -342,6 +473,9 @@ def main():
     # Other handlers
     application.add_handler(CommandHandler('commands', show_commands))
     application.add_handler(CommandHandler('stop_bet', stop_bet))
+    application.add_handler(CommandHandler('book', view_book_setup))
+    application.add_handler(CommandHandler('debug', debug_db))
+    application.add_handler(CommandHandler('test_notification', test_notification))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
     application.add_handler(CommandHandler('start', start))
@@ -359,7 +493,7 @@ def main():
                     chat_id=chat_id,
                     name=str(chat_id)
                 )
-                logger.info("Rescheduled reminder for chat_id %s", chat_id)
+                logger.info("Rescheduled reminder for chat_id %s at %s UTC", chat_id, notif_time.strftime("%H:%M"))
             except Exception as e:
                 logger.exception("Error rescheduling reminder for chat_id %s: %s", user['chat_id'], e)
 

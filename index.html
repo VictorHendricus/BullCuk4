@@ -9,7 +9,9 @@
         body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
         form { display: inline-block; text-align: left; }
         label { display: block; margin: 10px 0 5px; }
-        input { width: 100%; padding: 5px; }
+        input, select { width: 100%; padding: 5px; }
+        .time-container { display: flex; gap: 10px; }
+        .time-container input, .time-container select { width: calc(50% - 5px); }
         button { margin-top: 15px; padding: 10px 20px; background-color: #0088cc; color: white; border: none; cursor: pointer; }
         button:hover { background-color: #007bb5; }
     </style>
@@ -17,20 +19,56 @@
 <body>
     <h1>Setup Your Reading Goal</h1>
     <form id="setupForm">
+        <label for="book_title">Book Title:</label>
+        <input type="text" id="book_title" name="book_title" required>
+        
         <label for="pages">Daily Pages Goal:</label>
         <input type="number" id="pages" name="pages" min="1" required>
-        <label for="time">Notification Time (HH:MM, 24-hour, UTC):</label>
-        <input type="time" id="time" name="time" required>
+        
+        <label for="time">Notification Time & Time Zone:</label>
+        <div class="time-container">
+            <input type="time" id="time" name="time" required>
+            <select id="timezone" name="timezone" required>
+                <option value="-12">UTC-12</option>
+                <option value="-11">UTC-11</option>
+                <option value="-10">UTC-10</option>
+                <option value="-9">UTC-9</option>
+                <option value="-8">UTC-8</option>
+                <option value="-7">UTC-7</option>
+                <option value="-6">UTC-6</option>
+                <option value="-5">UTC-5</option>
+                <option value="-4">UTC-4</option>
+                <option value="-3">UTC-3</option>
+                <option value="-2">UTC-2</option>
+                <option value="-1">UTC-1</option>
+                <option value="0" selected>UTC+0</option>
+                <option value="1">UTC+1</option>
+                <option value="2">UTC+2</option>
+                <option value="3">UTC+3</option>
+                <option value="4">UTC+4</option>
+                <option value="5">UTC+5</option>
+                <option value="6">UTC+6</option>
+                <option value="7">UTC+7</option>
+                <option value="8">UTC+8</option>
+                <option value="9">UTC+9</option>
+                <option value="10">UTC+10</option>
+                <option value="11">UTC+11</option>
+                <option value="12">UTC+12</option>
+            </select>
+        </div>
+        
         <button type="submit">Submit</button>
     </form>
     <script>
         const form = document.getElementById('setupForm');
         form.addEventListener('submit', (e) => {
             e.preventDefault();
+            const book_title = document.getElementById('book_title').value;
             const pages = document.getElementById('pages').value;
             const time = document.getElementById('time').value;
+            const timezone = document.getElementById('timezone').value;
             const user_id = Telegram.WebApp.initDataUnsafe.user.id;
-            const data = { pages, time, user_id };
+            const data = { book_title, pages, time, timezone, user_id };
             Telegram.WebApp.sendData(JSON.stringify(data));
             Telegram.WebApp.close();
         });
