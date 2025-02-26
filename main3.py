@@ -25,29 +25,24 @@ logger = logging.getLogger(__name__)
 db = dataset.connect('sqlite:///books.db')
 
 # Database tables
-users_table = db['users']          # chat_id, user_id, username, referrer, daily_pages, notif_time
+users_table = db['users']          # chat_id, user_id, username, referrer, daily_pages, notif_time, book_title, timezone
 referrals_table = db['referrals']  # ref_code, chat_id, created_at
-daily_logs_table = db['daily_logs'] # chat_id, log_date, pages_read, note
+daily_logs_table = db['daily_logs'] # chat_id, log_date, pages_read, note, goal_completed, book_title
 bets_table = db['bets']            # user1, user2, start_date, status, payment_amount(USD)
 
 # Conversation states for daily log and payment
 (DL_PAGES, DL_NOTE) = range(10, 12)
 SET_PAYMENT = 20
 
-# Helper function to parse time (HH:MM 24-hour format, UTC)
+# Helper function to parse time (HH:MM 24-hour format)
 def parse_time(time_str: str) -> datetime.time:
     return datetime.datetime.strptime(time_str, "%H:%M").time()
 
 # Helper function to convert local time to UTC based on timezone offset
 def convert_to_utc(time_obj: datetime.time, timezone_offset: int) -> datetime.time:
-    # Create a datetime object for today with the given time
     now = datetime.datetime.now()
     dt = datetime.datetime.combine(now.date(), time_obj)
-    
-    # Apply timezone offset (convert to UTC)
     dt = dt - datetime.timedelta(hours=int(timezone_offset))
-    
-    # Return just the time component
     return dt.time()
 
 # Schedule a daily reminder
@@ -112,6 +107,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # Handle web app data
 async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
+    logger.info("Web app data handler triggered")  # Debugging line
     try:
         # Log the raw data for debugging
         raw_data = update.message.web_app_data.data
@@ -167,7 +163,7 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                     'referrer': referrer_chat_id
                 }, ['chat_id'])
                 existing_bet = bets_table.find_one(user1=referrer_chat_id, user2=chat_id) or \
-                            bets_table.find_one(user1=chat_id, user2=referrer_chat_id)
+                              bets_table.find_one(user1=chat_id, user2=referrer_chat_id)
                 if not existing_bet:
                     bets_table.insert({
                         'user1': referrer_chat_id,
@@ -195,7 +191,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         [InlineKeyboardButton("Generate Referral Link", callback_data="ref_link")],
         [InlineKeyboardButton("View Bet Status", callback_data="bet_status")],
         [InlineKeyboardButton("Log Daily Reading", callback_data="daily_log")],
-        [InlineKeyboardButton("View/Change Book", callback_data="view_book")]
+        [InlineKeyboardButton("View/Change Book", callback_data="view_book")],
+        [InlineKeyboardButton("Test Notification", callback_data="test_notif")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Main Menu:", reply_markup=reply_markup)
@@ -393,8 +390,8 @@ async def view_book_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def debug_db(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     
-    # Only allow for specific users or in development
-    if chat_id != 123456789:  # Replace with your chat_id for testing
+    # Only allow for specific users (replace with your chat_id)
+    if chat_id != 123456789:  # Replace with your actual chat_id for testing
         await update.message.reply_text("Debug command not available.")
         return
     
@@ -404,12 +401,10 @@ async def debug_db(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             user_info = f"User info:\n"
             for key, value in user.items():
                 user_info += f"{key}: {value}\n"
-            
             await update.message.reply_text(user_info)
         else:
             await update.message.reply_text("No user record found.")
             
-        # Check recent logs
         logs = list(daily_logs_table.find(chat_id=chat_id, order_by='-log_date', _limit=5))
         if logs:
             logs_info = f"\nRecent logs:\n"
@@ -438,7 +433,6 @@ async def test_notification(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     tz_display = f"UTC{'+' if int(timezone) >= 0 else ''}{timezone}"
     
-    # Send a test notification
     await update.message.reply_text(
         f"This is a test notification for '{book_title}'.\n\n"
         f"Your daily reminders are scheduled for {notif_time} {tz_display}.\n\n"
@@ -477,7 +471,8 @@ def main():
     application.add_handler(CommandHandler('debug', debug_db))
     application.add_handler(CommandHandler('test_notification', test_notification))
     application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
+    # Corrected filter for web app data
+    application.add_handler(MessageHandler(filters.WEB_APP_DATA, handle_web_app_data))
     application.add_handler(CommandHandler('start', start))
     application.add_error_handler(error_handler)
 
