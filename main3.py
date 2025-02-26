@@ -472,7 +472,7 @@ def main():
     application.add_handler(CommandHandler('test_notification', test_notification))
     application.add_handler(CallbackQueryHandler(button_handler))
     # Corrected filter for web app data
-    application.add_handler(MessageHandler(filters.WEB_APP_DATA, handle_web_app_data))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
     application.add_handler(CommandHandler('start', start))
     application.add_error_handler(error_handler)
 
